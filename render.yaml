@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: todo-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: SLACK_APP_TOKEN
+        sync: false
+      - key: GOOGLE_CREDENTIALS
+        sync: false

@@ -1,0 +1,4 @@
+slack-bolt==1.21.3
+gspread==6.2.1
+google-auth==2.48.0
+gunicorn==23.0.0
