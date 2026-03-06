@@ -2,6 +2,7 @@
 import os
 import re
 import json
+import base64
 import threading
 import gspread
 from google.oauth2.service_account import Credentials
@@ -16,7 +17,7 @@ app = App(token=os.environ['SLACK_BOT_TOKEN'])
 
 # Google Sheets setup
 scopes = ['https://www.googleapis.com/auth/spreadsheets']
-creds_json = json.loads(os.environ['GOOGLE_CREDENTIALS'])
+creds_json = json.loads(base64.b64decode(os.environ['GOOGLE_CREDENTIALS']).decode())
 creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
 gc = gspread.authorize(creds)
 sh = gc.open_by_key(SHEET_ID)
