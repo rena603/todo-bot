@@ -196,9 +196,15 @@ class HealthHandler(BaseHTTPRequestHandler):
                 self._json(400, {'error': 'id and updates required'})
                 return
             try:
+                row_num = find_row_by_id(task_id)
+                if not row_num:
+                    self._json(404, {'error': f'task {task_id} not found'})
+                    return
                 for field, value in updates.items():
-                    update_cell(task_id, field, str(value))
-                self._json(200, {'ok': True})
+                    col_num = COL_MAP.get(field)
+                    if col_num:
+                        ws.update_cell(row_num, col_num, str(value))
+                self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
             except Exception as e:
                 self._json(500, {'error': str(e)})
         else:
