@@ -149,12 +149,75 @@ def handle_mention(event, say):
     )
 
 
-# Health check server to keep Render awake
+# Column index map (0-based)
+COL_MAP = {
+    'id': 1, 'name': 2, 'project': 3, 'status': 4,
+    'date': 5, 'dateStart': 6, 'dateEnd': 7,
+    'assignees': 8, 'stars': 9, 'hearts': 10,
+    'ballOwner': 11, 'notes': 12, 'group': 13, 'dataset': 14,
+}
+
+
+def find_row_by_id(task_id):
+    """Find the row number (1-based) for a given task ID."""
+    rows = ws.get_all_values()
+    for i, r in enumerate(rows):
+        if r and r[0] == task_id:
+            return i + 1  # 1-based
+    return None
+
+
+def update_cell(task_id, field, value):
+    """Update a single cell in the sheet by task ID and field name."""
+    row_num = find_row_by_id(task_id)
+    if not row_num:
+        return False
+    col_num = COL_MAP.get(field)
+    if not col_num:
+        return False
+    ws.update_cell(row_num, col_num, value)
+    return True
+
+
+# API + Health check server
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'OK')
+
+    def do_POST(self):
+        if self.path == '/api/update':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length))
+            task_id = body.get('id')
+            updates = body.get('updates', {})
+            if not task_id or not updates:
+                self._json(400, {'error': 'id and updates required'})
+                return
+            try:
+                for field, value in updates.items():
+                    update_cell(task_id, field, str(value))
+                self._json(200, {'ok': True})
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+        else:
+            self._json(404, {'error': 'not found'})
+
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def _json(self, code, data):
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(json.dumps(data).encode())
+
     def log_message(self, *args):
         pass
 
