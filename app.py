@@ -4,6 +4,7 @@ import re
 import json
 import base64
 import threading
+import urllib.request
 import gspread
 from google.oauth2.service_account import Credentials
 from slack_bolt import App
@@ -232,7 +233,19 @@ def start_health_server():
     HTTPServer(('0.0.0.0', port), HealthHandler).serve_forever()
 
 
+def keep_alive():
+    """Self-ping every 5 minutes to prevent Render free tier from sleeping."""
+    url = os.environ.get('RENDER_EXTERNAL_URL', 'https://todo-bot-u0rs.onrender.com')
+    while True:
+        threading.Event().wait(300)  # 5 minutes
+        try:
+            urllib.request.urlopen(url, timeout=10)
+        except Exception:
+            pass
+
+
 if __name__ == '__main__':
     threading.Thread(target=start_health_server, daemon=True).start()
+    threading.Thread(target=keep_alive, daemon=True).start()
     handler = SocketModeHandler(app, os.environ['SLACK_APP_TOKEN'])
     handler.start()
