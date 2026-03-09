@@ -241,6 +241,22 @@ class HealthHandler(BaseHTTPRequestHandler):
                 self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
             except Exception as e:
                 self._json(500, {'error': str(e)})
+        elif self.path == '/api/delete':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length))
+            task_id = body.get('id')
+            if not task_id:
+                self._json(400, {'error': 'id required'})
+                return
+            try:
+                row_num = find_row_by_id(task_id)
+                if not row_num:
+                    self._json(404, {'error': f'task {task_id} not found'})
+                    return
+                ws.delete_rows(row_num)
+                self._json(200, {'ok': True, 'deleted': task_id})
+            except Exception as e:
+                self._json(500, {'error': str(e)})
         else:
             self._json(404, {'error': 'not found'})
 
