@@ -132,20 +132,8 @@ def handle_mention(event, say):
 
     ws.append_row(row)
 
-    ds_label = 'アプリPJT' if task['dataset'] == 'app' else '既存案件'
-    assignee_str = task['assignees'] or '未設定'
-    date_str = task['date'] or '未設定'
-
     say(
-        text=(
-            f"*TODO追加しました* :white_check_mark:\n"
-            f"• タスク: {task['name']}\n"
-            f"• 案件: {task['project'] or '未設定'}\n"
-            f"• 担当: {assignee_str}\n"
-            f"• 期限: {date_str}\n"
-            f"• カテゴリ: {ds_label}\n"
-            f"_アプリで同期ボタンを押すと反映されます_"
-        ),
+        text=f":white_check_mark: *{task['name']}* を追加しました",
         thread_ts=event.get('ts'),
     )
 
