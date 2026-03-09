@@ -47,7 +47,11 @@ def next_id(dataset):
 
 
 def parse_task(text):
+    # Remove mentions
     text = re.sub(r'<@[A-Z0-9]+>', '', text).strip()
+    # Unwrap Slack auto-links: <http://tenki.jp|tenki.jp> -> tenki.jp
+    text = re.sub(r'<[^|>]+\|([^>]+)>', r'\1', text)
+    text = re.sub(r'<([^>]+)>', r'\1', text)
 
     task = {
         'project': '', 'name': '', 'assignees': '',
@@ -57,46 +61,67 @@ def parse_task(text):
     }
 
     # Extract fields from bullet-point lines or inline keywords
-    # Bullet prefix: •, -, ＊, *, etc.
-    bullet = r'[•\-＊\*]?\s*'
+    bullet = r'[•\-＊\*]\s*'
 
-    m = re.search(bullet + r'案件[:：]\s*(.+)', text)
-    if m:
-        task['project'] = m.group(1).strip()
-        text = text[:m.start()] + text[m.end():]
+    # Process line by line to cleanly separate fields from task name
+    lines = text.split('\n')
+    remaining_lines = []
 
-    m = re.search(bullet + r'担当[:：]\s*([^\s]+)', text)
-    if m:
+    for line in lines:
+        stripped = line.strip()
+
+        m = re.match(bullet + r'案件[:：]\s*(.+)', stripped)
+        if m:
+            task['project'] = m.group(1).strip()
+            continue
+
+        m = re.match(bullet + r'担当[:：]\s*([^\s]+)', stripped)
+        if m:
+            names = [resolve_name(n.strip()) for n in m.group(1).split(',')]
+            task['assignees'] = ','.join(names)
+            continue
+
+        m = re.match(bullet + r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', stripped)
+        if m:
+            task['date'] = m.group(1).replace('/', '-')
+            continue
+
+        m = re.match(bullet + r'開始[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', stripped)
+        if m:
+            task['dateStart'] = m.group(1).replace('/', '-')
+            continue
+
+        m = re.match(bullet + r'終了[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', stripped)
+        if m:
+            task['dateEnd'] = m.group(1).replace('/', '-')
+            continue
+
+        m = re.match(bullet + r'カテゴリ[:：]\s*(アプリ|app)', stripped, re.I)
+        if m:
+            task['dataset'] = 'app'
+            continue
+
+        remaining_lines.append(stripped)
+
+    # Also check inline keywords in remaining text
+    text = ' '.join(remaining_lines).strip()
+
+    m = re.search(r'担当[:：]\s*([^\s]+)', text)
+    if m and not task['assignees']:
         names = [resolve_name(n.strip()) for n in m.group(1).split(',')]
         task['assignees'] = ','.join(names)
         text = text[:m.start()] + text[m.end():]
 
-    m = re.search(bullet + r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
-    if m:
+    m = re.search(r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
+    if m and not task['date']:
         task['date'] = m.group(1).replace('/', '-')
         text = text[:m.start()] + text[m.end():]
 
-    m = re.search(bullet + r'開始[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
-    if m:
-        task['dateStart'] = m.group(1).replace('/', '-')
-        text = text[:m.start()] + text[m.end():]
-
-    m = re.search(bullet + r'終了[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
-    if m:
-        task['dateEnd'] = m.group(1).replace('/', '-')
-        text = text[:m.start()] + text[m.end():]
-
-    m = re.search(bullet + r'カテゴリ[:：]\s*(アプリ|app)', text, re.I)
-    if m:
-        task['dataset'] = 'app'
-        text = text[:m.start()] + text[m.end():]
-    elif re.search(r'(アプリ|app)\s*$', text, re.I):
+    if re.search(r'(アプリ|app)\s*$', text, re.I):
         task['dataset'] = 'app'
         text = re.sub(r'\s*(アプリ|app)\s*$', '', text, flags=re.I)
 
-    # Remaining text = task name (clean up bullet prefixes and blank lines)
-    text = re.sub(r'[•\-＊\*]\s*', '', text)
-    text = ' '.join(text.split()).strip()
+    text = text.strip()
 
     # If project was not set via 案件: field, try first-word convention
     if not task['project']:
