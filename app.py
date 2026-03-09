@@ -56,38 +56,58 @@ def parse_task(text):
         'ballOwner': '', 'notes': '', 'dataset': 'work',
     }
 
-    m = re.search(r'担当[:：]\s*([^\s]+)', text)
+    # Extract fields from bullet-point lines or inline keywords
+    # Bullet prefix: •, -, ＊, *, etc.
+    bullet = r'[•\-＊\*]?\s*'
+
+    m = re.search(bullet + r'案件[:：]\s*(.+)', text)
+    if m:
+        task['project'] = m.group(1).strip()
+        text = text[:m.start()] + text[m.end():]
+
+    m = re.search(bullet + r'担当[:：]\s*([^\s]+)', text)
     if m:
         names = [resolve_name(n.strip()) for n in m.group(1).split(',')]
         task['assignees'] = ','.join(names)
         text = text[:m.start()] + text[m.end():]
 
-    m = re.search(r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
+    m = re.search(bullet + r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
     if m:
         task['date'] = m.group(1).replace('/', '-')
         text = text[:m.start()] + text[m.end():]
 
-    m = re.search(r'開始[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
+    m = re.search(bullet + r'開始[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
     if m:
         task['dateStart'] = m.group(1).replace('/', '-')
         text = text[:m.start()] + text[m.end():]
 
-    m = re.search(r'終了[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
+    m = re.search(bullet + r'終了[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
     if m:
         task['dateEnd'] = m.group(1).replace('/', '-')
         text = text[:m.start()] + text[m.end():]
 
-    if re.search(r'(アプリ|app)\s*$', text, re.I):
+    m = re.search(bullet + r'カテゴリ[:：]\s*(アプリ|app)', text, re.I)
+    if m:
+        task['dataset'] = 'app'
+        text = text[:m.start()] + text[m.end():]
+    elif re.search(r'(アプリ|app)\s*$', text, re.I):
         task['dataset'] = 'app'
         text = re.sub(r'\s*(アプリ|app)\s*$', '', text, flags=re.I)
 
-    text = text.strip()
-    parts = text.split(None, 1)
-    if len(parts) >= 2:
-        task['project'] = parts[0]
-        task['name'] = parts[1].strip()
-    elif len(parts) == 1:
-        task['name'] = parts[0]
+    # Remaining text = task name (clean up bullet prefixes and blank lines)
+    text = re.sub(r'[•\-＊\*]\s*', '', text)
+    text = ' '.join(text.split()).strip()
+
+    # If project was not set via 案件: field, try first-word convention
+    if not task['project']:
+        parts = text.split(None, 1)
+        if len(parts) >= 2:
+            task['project'] = parts[0]
+            task['name'] = parts[1].strip()
+        elif len(parts) == 1:
+            task['name'] = parts[0]
+    else:
+        task['name'] = text
 
     return task
 
