@@ -34,9 +34,36 @@ NAME_MAP = {
     'tatsuya': 'Tatsuya Eguchi',
 }
 
+# Slack送信者ごとのデフォルトプロジェクト（案件未指定時に適用）
+DEFAULT_PROJECT = {
+    'rena': '中国銀行',
+    'kanako': 'Stock point',
+}
+
+# Slack user ID → NAME_MAPキーのキャッシュ
+_slack_name_cache = {}
+
 
 def resolve_name(name):
     return NAME_MAP.get(name.lower(), name)
+
+
+def slack_user_to_key(user_id):
+    """Slack user IDからNAME_MAPのキーを返す"""
+    if user_id in _slack_name_cache:
+        return _slack_name_cache[user_id]
+    try:
+        info = app.client.users_info(user=user_id)
+        display = (info['user'].get('profile', {}).get('display_name', '') or
+                   info['user'].get('real_name', '')).lower()
+        for key in NAME_MAP:
+            if key in display:
+                _slack_name_cache[user_id] = key
+                return key
+    except Exception:
+        pass
+    _slack_name_cache[user_id] = None
+    return None
 
 
 def next_id(dataset):
@@ -166,6 +193,12 @@ def handle_mention(event, say):
     if not task['name']:
         say(text="タスク名がわかりませんでした。\n`@todo-bot [案件名] タスク名 担当:name 期限:YYYY-MM-DD`", thread_ts=event.get('ts'))
         return
+
+    # 案件未指定なら送信者のデフォルトプロジェクトを適用
+    if not task['project']:
+        sender = slack_user_to_key(event.get('user', ''))
+        if sender and sender in DEFAULT_PROJECT:
+            task['project'] = DEFAULT_PROJECT[sender]
 
     tid = next_id(task['dataset'])
     group = '既存案件' if task['dataset'] == 'work' else ''
