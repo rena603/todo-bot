@@ -271,9 +271,47 @@ def update_cell(task_id, field, value):
     return True
 
 
+# Settings sheet (project colors etc.)
+def get_settings_ws():
+    try:
+        return sh.worksheet('settings')
+    except gspread.exceptions.WorksheetNotFound:
+        sws = sh.add_worksheet(title='settings', rows=100, cols=2)
+        sws.update_cell(1, 1, 'key')
+        sws.update_cell(1, 2, 'value')
+        return sws
+
+
+def get_proj_colors():
+    sws = get_settings_ws()
+    rows = sws.get_all_values()
+    colors = {}
+    for r in rows[1:]:
+        if len(r) >= 2 and r[0].startswith('projcolor:'):
+            colors[r[0][len('projcolor:'):]] = r[1]
+    return colors
+
+
+def set_proj_color(project, color_id):
+    sws = get_settings_ws()
+    rows = sws.get_all_values()
+    key = f'projcolor:{project}'
+    for i, r in enumerate(rows):
+        if r and r[0] == key:
+            sws.update_cell(i + 1, 2, color_id)
+            return
+    sws.append_row([key, color_id])
+
+
 # API + Health check server
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if self.path == '/api/projcolors':
+            try:
+                self._json(200, get_proj_colors())
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+            return
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'OK')
@@ -297,6 +335,19 @@ class HealthHandler(BaseHTTPRequestHandler):
                     if col_num:
                         ws.update_cell(row_num, col_num, str(value))
                 self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
+            except Exception as e:
+                self._json(500, {'error': str(e)})
+        elif self.path == '/api/projcolors':
+            length = int(self.headers.get('Content-Length', 0))
+            body = json.loads(self.rfile.read(length))
+            project = body.get('project')
+            color_id = body.get('colorId')
+            if not project or not color_id:
+                self._json(400, {'error': 'project and colorId required'})
+                return
+            try:
+                set_proj_color(project, color_id)
+                self._json(200, {'ok': True})
             except Exception as e:
                 self._json(500, {'error': str(e)})
         elif self.path == '/api/delete':
