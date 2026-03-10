@@ -123,6 +123,11 @@ def parse_task(text):
             task['dateEnd'] = m.group(1).replace('/', '-')
             continue
 
+        m = re.match(bullet + r'ボール[:：]\s*([^\s]+)', stripped)
+        if m:
+            task['ballOwner'] = resolve_name(m.group(1).strip())
+            continue
+
         m = re.match(bullet + r'カテゴリ[:：]\s*(アプリ|app)', stripped, re.I)
         if m:
             task['dataset'] = 'app'
@@ -142,6 +147,11 @@ def parse_task(text):
     m = re.search(r'期限[:：]\s*(\d{4}[-/]\d{1,2}[-/]\d{1,2})', text)
     if m and not task['date']:
         task['date'] = m.group(1).replace('/', '-')
+        text = text[:m.start()] + text[m.end():]
+
+    m = re.search(r'ボール[:：]\s*([^\s]+)', text)
+    if m and not task['ballOwner']:
+        task['ballOwner'] = resolve_name(m.group(1).strip())
         text = text[:m.start()] + text[m.end():]
 
     if re.search(r'(アプリ|app)\s*$', text, re.I):
