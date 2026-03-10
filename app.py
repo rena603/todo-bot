@@ -97,6 +97,11 @@ def parse_task(text):
     for line in lines:
         stripped = line.strip()
 
+        m = re.match(bullet + r'タスク[:：]\s*(.+)', stripped)
+        if m:
+            task['name'] = m.group(1).strip()
+            continue
+
         m = re.match(bullet + r'案件[:：]\s*(.+)', stripped)
         if m:
             task['project'] = m.group(1).strip()
@@ -138,6 +143,11 @@ def parse_task(text):
     # Also check inline keywords in remaining text
     text = ' '.join(remaining_lines).strip()
 
+    m = re.search(r'タスク[:：]\s*([^\s]+(?:\s+[^\s:：]+)*)', text)
+    if m and not task['name']:
+        task['name'] = m.group(1).strip()
+        text = text[:m.start()] + text[m.end():]
+
     m = re.search(r'担当[:：]\s*([^\s]+)', text)
     if m and not task['assignees']:
         names = [resolve_name(n.strip()) for n in m.group(1).split(',')]
@@ -160,16 +170,21 @@ def parse_task(text):
 
     text = text.strip()
 
-    # If project was not set via 案件: field, try first-word convention
-    if not task['project']:
-        parts = text.split(None, 1)
-        if len(parts) >= 2:
-            task['project'] = parts[0]
-            task['name'] = parts[1].strip()
-        elif len(parts) == 1:
-            task['name'] = parts[0]
+    # タスク名が明示指定済みなら残りテキストは案件名の推定のみ
+    if task['name']:
+        if not task['project'] and text:
+            task['project'] = text.split(None, 1)[0]
     else:
-        task['name'] = text
+        # If project was not set via 案件: field, try first-word convention
+        if not task['project']:
+            parts = text.split(None, 1)
+            if len(parts) >= 2:
+                task['project'] = parts[0]
+                task['name'] = parts[1].strip()
+            elif len(parts) == 1:
+                task['name'] = parts[0]
+        else:
+            task['name'] = text
 
     return task
 
