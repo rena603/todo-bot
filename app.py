@@ -34,18 +34,52 @@ NAME_MAP = {
     'tatsuya': 'Tatsuya Eguchi',
 }
 
+# ballOwner値 → 分報チャンネル名のマッピング（逆引き）
+BUNPO_CHANNEL = {}
+for _key, _val in NAME_MAP.items():
+    BUNPO_CHANNEL[_val] = f'分報_{_key}'
+    BUNPO_CHANNEL[_key] = f'分報_{_key}'
+
 # Slack送信者ごとのデフォルトプロジェクト（案件未指定時に適用）
 DEFAULT_PROJECT = {
     'rena': '中国銀行',
     'kanako': 'Stock point',
 }
 
-# Slack user ID → NAME_MAPキーのキャッシュ
-_slack_name_cache = {}
+# NAME_MAPキー → Slack user ID
+_name_to_slack_id = {
+    'ayano': 'U01FRMDAV7C',
+    'midori': 'U01HKPTH73P',
+    'kanako': 'U048WF9GFHD',
+    'rena': 'U02M0EKD1DJ',
+    'tatsuya': 'U6RA29B50',
+    'satsuki': 'U0A2Y6AM9V4',
+    'chihiro': 'U0ABCPF9XKQ',
+}
+# Slack user ID → NAME_MAPキーのキャッシュ（逆引き）
+_slack_name_cache = {v: k for k, v in _name_to_slack_id.items()}
 
 
 def resolve_name(name):
     return NAME_MAP.get(name.lower(), name)
+
+
+def build_slack_id_cache():
+    """起動時にSlack users.listから未登録メンバーのIDを補完"""
+    try:
+        res = app.client.users_list()
+        for u in res.get('members', []):
+            if u.get('is_bot') or u.get('deleted'):
+                continue
+            display = (u.get('profile', {}).get('display_name', '') or
+                       u.get('real_name', '')).lower()
+            for key in NAME_MAP:
+                if key not in _name_to_slack_id and key in display:
+                    _slack_name_cache[u['id']] = key
+                    _name_to_slack_id[key] = u['id']
+                    break
+    except Exception as e:
+        print(f"[build_slack_id_cache] {e}")
 
 
 def slack_user_to_key(user_id):
@@ -59,6 +93,7 @@ def slack_user_to_key(user_id):
         for key in NAME_MAP:
             if key in display:
                 _slack_name_cache[user_id] = key
+                _name_to_slack_id[key] = user_id
                 return key
     except Exception:
         pass
@@ -303,6 +338,34 @@ def set_proj_color(project, color_id):
     sws.append_row([key, color_id])
 
 
+# チャンネル名 → ID のキャッシュ
+_channel_id_cache = {}
+
+
+def notify_bunpo(channel_name, task_label, from_owner, new_owner_key):
+    """分報チャンネルにボール移動の通知を送信（メンション付き）"""
+    try:
+        # チャンネルIDをキャッシュから取得、なければ検索
+        if channel_name not in _channel_id_cache:
+            res = app.client.conversations_list(types='public_channel,private_channel', limit=500)
+            for ch in res['channels']:
+                if ch['name'] == channel_name:
+                    _channel_id_cache[channel_name] = ch['id']
+                    break
+        ch_id = _channel_id_cache.get(channel_name)
+        if not ch_id:
+            return
+        # メンション用のSlack user IDを取得
+        slack_id = _name_to_slack_id.get(new_owner_key)
+        mention = f"<@{slack_id}>" if slack_id else new_owner_key
+        app.client.chat_postMessage(
+            channel=ch_id,
+            text=f":basketball: {mention} *{task_label}* のボールが回ってきました（{from_owner} →）",
+        )
+    except Exception as e:
+        print(f"[notify_bunpo] {channel_name}: {e}")
+
+
 # API + Health check server
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -330,10 +393,27 @@ class HealthHandler(BaseHTTPRequestHandler):
                 if not row_num:
                     self._json(404, {'error': f'task {task_id} not found'})
                     return
+                # ballOwner変更検知用: 更新前の値を取得
+                old_ball = None
+                if 'ballOwner' in updates:
+                    row_data = ws.row_values(row_num)
+                    old_ball = row_data[COL_MAP['ballOwner'] - 1] if len(row_data) >= COL_MAP['ballOwner'] else ''
                 for field, value in updates.items():
                     col_num = COL_MAP.get(field)
                     if col_num:
                         ws.update_cell(row_num, col_num, str(value))
+                # ballOwner変更時に分報チャンネルへ通知
+                if 'ballOwner' in updates and updates['ballOwner'] != old_ball:
+                    new_ball = updates['ballOwner']
+                    channel_name = BUNPO_CHANNEL.get(new_ball)
+                    if channel_name:
+                        row_data = ws.row_values(row_num)
+                        task_name = row_data[COL_MAP['name'] - 1] if len(row_data) >= COL_MAP['name'] else task_id
+                        project = row_data[COL_MAP['project'] - 1] if len(row_data) >= COL_MAP['project'] else ''
+                        label = f"[{project}] {task_name}" if project else task_name
+                        # BUNPO_CHANNELからNAME_MAPキーを逆引き
+                        owner_key = channel_name.replace('分報_', '')
+                        notify_bunpo(channel_name, label, old_ball or '(未設定)', owner_key)
                 self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
             except Exception as e:
                 self._json(500, {'error': str(e)})
@@ -405,5 +485,6 @@ def keep_alive():
 if __name__ == '__main__':
     threading.Thread(target=start_health_server, daemon=True).start()
     threading.Thread(target=keep_alive, daemon=True).start()
+    build_slack_id_cache()
     handler = SocketModeHandler(app, os.environ['SLACK_APP_TOKEN'])
     handler.start()
