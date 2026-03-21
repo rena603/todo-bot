@@ -342,18 +342,34 @@ def set_proj_color(project, color_id):
 _channel_id_cache = {}
 
 
+def _build_channel_cache():
+    """全チャンネルをページネーション付きで取得しキャッシュに格納"""
+    try:
+        cursor = None
+        while True:
+            kwargs = dict(types='public_channel,private_channel', limit=200)
+            if cursor:
+                kwargs['cursor'] = cursor
+            res = app.client.conversations_list(**kwargs)
+            for ch in res['channels']:
+                _channel_id_cache[ch['name']] = ch['id']
+            cursor = res.get('response_metadata', {}).get('next_cursor')
+            if not cursor:
+                break
+        print(f"[channel_cache] {len(_channel_id_cache)} channels cached")
+    except Exception as e:
+        print(f"[channel_cache] ERROR: {e}")
+
+
 def notify_bunpo(channel_name, task_label, from_owner, new_owner_key):
     """分報チャンネルにボール移動の通知を送信（メンション付き）"""
     try:
-        # チャンネルIDをキャッシュから取得、なければ検索
-        if channel_name not in _channel_id_cache:
-            res = app.client.conversations_list(types='public_channel,private_channel', limit=500)
-            for ch in res['channels']:
-                if ch['name'] == channel_name:
-                    _channel_id_cache[channel_name] = ch['id']
-                    break
+        # キャッシュが空なら全チャンネルを取得
+        if not _channel_id_cache:
+            _build_channel_cache()
         ch_id = _channel_id_cache.get(channel_name)
         if not ch_id:
+            print(f"[notify_bunpo] channel '{channel_name}' not found. Available: {[k for k in _channel_id_cache if '分報' in k]}")
             return
         # メンション用のSlack user IDを取得
         slack_id = _name_to_slack_id.get(new_owner_key)
@@ -362,8 +378,9 @@ def notify_bunpo(channel_name, task_label, from_owner, new_owner_key):
             channel=ch_id,
             text=f":basketball: {mention} *{task_label}* のボールが回ってきました（{from_owner} →）",
         )
+        print(f"[notify_bunpo] OK: {channel_name} <- {task_label}")
     except Exception as e:
-        print(f"[notify_bunpo] {channel_name}: {e}")
+        print(f"[notify_bunpo] ERROR {channel_name}: {e}")
 
 
 # API + Health check server
@@ -394,26 +411,28 @@ class HealthHandler(BaseHTTPRequestHandler):
                     self._json(404, {'error': f'task {task_id} not found'})
                     return
                 # ballOwner変更検知用: 更新前の値を取得
-                old_ball = None
+                old_ball = ''
                 if 'ballOwner' in updates:
                     row_data = ws.row_values(row_num)
-                    old_ball = row_data[COL_MAP['ballOwner'] - 1] if len(row_data) >= COL_MAP['ballOwner'] else ''
+                    old_ball = (row_data[COL_MAP['ballOwner'] - 1] if len(row_data) >= COL_MAP['ballOwner'] else '').strip()
                 for field, value in updates.items():
                     col_num = COL_MAP.get(field)
                     if col_num:
                         ws.update_cell(row_num, col_num, str(value))
                 # ballOwner変更時に分報チャンネルへ通知
-                if 'ballOwner' in updates and updates['ballOwner'] != old_ball:
-                    new_ball = updates['ballOwner']
+                new_ball = updates.get('ballOwner', '').strip()
+                if 'ballOwner' in updates and new_ball != old_ball and new_ball:
+                    print(f"[ball_change] '{old_ball}' -> '{new_ball}' (task {task_id})")
                     channel_name = BUNPO_CHANNEL.get(new_ball)
                     if channel_name:
                         row_data = ws.row_values(row_num)
                         task_name = row_data[COL_MAP['name'] - 1] if len(row_data) >= COL_MAP['name'] else task_id
                         project = row_data[COL_MAP['project'] - 1] if len(row_data) >= COL_MAP['project'] else ''
                         label = f"[{project}] {task_name}" if project else task_name
-                        # BUNPO_CHANNELからNAME_MAPキーを逆引き
                         owner_key = channel_name.replace('分報_', '')
                         notify_bunpo(channel_name, label, old_ball or '(未設定)', owner_key)
+                    else:
+                        print(f"[ball_change] no channel mapping for '{new_ball}'. Known: {list(BUNPO_CHANNEL.keys())}")
                 self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
             except Exception as e:
                 self._json(500, {'error': str(e)})
@@ -486,5 +505,6 @@ if __name__ == '__main__':
     threading.Thread(target=start_health_server, daemon=True).start()
     threading.Thread(target=keep_alive, daemon=True).start()
     build_slack_id_cache()
+    _build_channel_cache()
     handler = SocketModeHandler(app, os.environ['SLACK_APP_TOKEN'])
     handler.start()
