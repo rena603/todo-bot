@@ -392,6 +392,15 @@ class HealthHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json(500, {'error': str(e)})
             return
+        if self.path == '/api/debug':
+            bunpo_channels = [k for k in _channel_id_cache if '分報' in k or 'bunpo' in k or 'funho' in k]
+            self._json(200, {
+                'bunpo_channel_map': BUNPO_CHANNEL,
+                'channel_cache_size': len(_channel_id_cache),
+                'bunpo_in_cache': {ch: _channel_id_cache[ch] for ch in bunpo_channels},
+                'all_channels_sample': list(_channel_id_cache.keys())[:50],
+            })
+            return
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b'OK')
@@ -421,6 +430,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                         ws.update_cell(row_num, col_num, str(value))
                 # ballOwner変更時に分報チャンネルへ通知
                 new_ball = updates.get('ballOwner', '').strip()
+                print(f"[api/update] task={task_id} ballOwner in updates={'ballOwner' in updates} old='{old_ball}' new='{new_ball}'")
                 if 'ballOwner' in updates and new_ball != old_ball and new_ball:
                     print(f"[ball_change] '{old_ball}' -> '{new_ball}' (task {task_id})")
                     channel_name = BUNPO_CHANNEL.get(new_ball)
@@ -433,6 +443,8 @@ class HealthHandler(BaseHTTPRequestHandler):
                         notify_bunpo(channel_name, label, old_ball or '(未設定)', owner_key)
                     else:
                         print(f"[ball_change] no channel mapping for '{new_ball}'. Known: {list(BUNPO_CHANNEL.keys())}")
+                elif 'ballOwner' in updates:
+                    print(f"[ball_change] SKIPPED: same value or empty (old='{old_ball}' new='{new_ball}')")
                 self._json(200, {'ok': True, 'row': row_num, 'updates': updates})
             except Exception as e:
                 self._json(500, {'error': str(e)})
