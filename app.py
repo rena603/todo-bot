@@ -393,12 +393,32 @@ class HealthHandler(BaseHTTPRequestHandler):
                 self._json(500, {'error': str(e)})
             return
         if self.path == '/api/debug':
+            # キャッシュが空なら再構築を試みてエラーを返す
+            cache_error = None
+            if not _channel_id_cache:
+                try:
+                    _build_channel_cache()
+                except Exception as e:
+                    cache_error = str(e)
             bunpo_channels = [k for k in _channel_id_cache if '分報' in k or 'bunpo' in k or 'funho' in k]
+            # Slack API直接テスト
+            slack_test = None
+            try:
+                test_res = app.client.conversations_list(types='public_channel,private_channel', limit=5)
+                slack_test = {
+                    'ok': test_res.get('ok'),
+                    'channel_count': len(test_res.get('channels', [])),
+                    'channels': [c['name'] for c in test_res.get('channels', [])],
+                }
+            except Exception as e:
+                slack_test = {'error': str(e)}
             self._json(200, {
                 'bunpo_channel_map': BUNPO_CHANNEL,
                 'channel_cache_size': len(_channel_id_cache),
                 'bunpo_in_cache': {ch: _channel_id_cache[ch] for ch in bunpo_channels},
                 'all_channels_sample': list(_channel_id_cache.keys())[:50],
+                'cache_rebuild_error': cache_error,
+                'slack_api_test': slack_test,
             })
             return
         self.send_response(200)
